@@ -1,3 +1,7 @@
+/**
+ * 在 worker 中也是不允许访问 dom 的，
+ * 但它提供了importScripts 函数用于导入外部脚本，通过它导入 spark-md5
+ */
 self.importScripts('./spark-md5.min.js')
 
 /**
@@ -41,6 +45,12 @@ self.onmessage = e => {
 }
 
 /**
- * todo
- * 1、大文件计算太慢，WebAssembly技术来计算md5可以加快50%的速度
+ * 思考：
+ * 1、有人建议：大文件计算太慢，WebAssembly技术来计算md5可以加快50%的速度
+ */
+
+/**
+ * 【笔记】
+ * SparkMD5是MD5算法的一个快速md5实现。这个脚本基于JKM md5库，是目前最快的算法。这最适合在浏览器上使用，因为nodejs版本可能会更快。
+ * 
  */

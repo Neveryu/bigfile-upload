@@ -13,6 +13,10 @@ server.on("request", (req, res) => {
     return
   }
 
+  if (req.url === '/verify') {
+    // todo
+  }
+
   if (req.url === '/merge') {
   	controller.handleMerge(req, res)
   }

@@ -112,6 +112,27 @@ module.exports = class {
 		const data = await resolvePost(req)
 		const { fileHash, filename, size } = data
 		const filePath = path.resolve(UPLOAD_DIR, `${fileHash}${extractExt(filename)}`)
+		// 如果大文件已经存在，则直接返回
+		if (fse.existsSync(filePath)) {
+			res.end(
+				JSON.stringify({
+					code: 0,
+					message: 'file merged success'
+				})
+			)
+			return
+		}
+		const chunkDir = path.resolve(UPLOAD_DIR, fileHash)
+		// 切片目录不存在，则无法合并切片，报异常
+		if (!fse.existsSync(chunkDir)) {
+			res.end(
+				JSON.stringify({
+					code: 500,
+					message: '文件上传失败-切片文件夹不存在'
+				})
+			)
+			return
+		}
 		await mergeFileChunk(filePath, fileHash, size)
 		res.end(
 			JSON.stringify({

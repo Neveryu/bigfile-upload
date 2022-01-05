@@ -8,6 +8,8 @@
   	<fc-typing-input placeholder="选择文件"></fc-typing-input>
   	<br><br>
   	<fc-underline-btn @click.stop="handleUpload">上传</fc-underline-btn>
+    <br><br>
+    <span>计算文件hash进度： {{hashPercentage}}</span>
   	<br><br>
     <span>上次进度：{{uploadPercentage}}</span>
   </div>
@@ -20,7 +22,7 @@ const Status = {
 	pause: 'pause',
 	uploading: 'uploading'
 }
-const SIZE = 10 * 1024
+const SIZE = 1000 * 1024
 // 基于xhr封装的，用来发送请求的
 function request({
   url,
@@ -69,16 +71,12 @@ export default {
         return 0
       }
       // todo
-      // percentage有问题
       const loaded = data.value.map(item => {
         return item.size * item.percentage
       }).reduce((acc, cur) => {
-        console.log(acc, cur)
-        acc + cur
+        return acc + cur
       })
-      console.log(loaded, container.file.size)
-      return 0
-      // return parseInt((loaded / container.file.size).toFixed(2))
+      return parseInt((loaded / container.file.size).toFixed(2))
     })
 
     function handleFileChange(e) {
@@ -104,7 +102,13 @@ export default {
     	console.log('文件分了多少片：', fileChunkList.length)
     	// 文件hash
     	container.hash = await calculateHash(fileChunkList)
-    	console.log('文件hash时：', container.hash)
+    	console.log('文件hash是：', container.hash)
+
+      const { shouldUpload } = await verifyUpload(container.file.name, container.file.hash)
+      if(!shouldUpload) {
+        console.log('秒传：上传成功')
+        return
+      }
 
     	data.value = fileChunkList.map(({ file }, index) => ({
     		fileHash: container.hash,
@@ -196,6 +200,20 @@ export default {
       }
     }
 
+    function verifyUpload(filename, fileHash) {
+      const { data } = await request({
+        url: 'http://localhost:9999/verify',
+        headers: {
+          "content-type": "application/json"
+        },
+        data: JSON.stringify({
+          filename,
+          fileHash
+        })
+      })
+      return JSON.parse(data)
+    }
+
     async function mergeRequest() {
     	await request({
     		url: "http://localhost:9999/merge",
@@ -215,6 +233,7 @@ export default {
 
 
     return {
+      hashPercentage,
       uploadPercentage,
       container,
       handleFileChange,
