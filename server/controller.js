@@ -106,6 +106,17 @@ const createUploadedList = async fileHash => {
 	return fse.existsSync(path.resolve(UPLOAD_DIR, fileHash)) ? await fse.readdir(path.resolve(UPLOAD_DIR, fileHash)) : []
 }
 
+/**
+ * 返回已经上传切片名
+ * @param {*} fileHash 
+ * @returns 
+ */
+const createUploadedList = async fileHash => {
+  return fse.existsSync(path.resolve(UPLOAD_DIR, fileHash))
+		? await fse.readdir(path.resolve(UPLOAD_DIR, fileHash))
+		: []
+}
+
 module.exports = class {
 	// 合并切片
 	async	handleMerge(req, res) {
@@ -184,5 +195,32 @@ module.exports = class {
 			fse.move(chunk.path, path.resolve(chunkDir, hash))
 			res.end('received file chunk')
 		})	
+	}
+
+	/**
+	 * 验证文件是否已上传，如已上传，则不用上传，相当于秒传成功
+	 * 如果文件不在服务器中，则返回已经上传在服务器中的切片数组
+	 * @param {*} req 
+	 * @param {*} res 
+	 */
+	async handleVerifyUpload(req, res) {
+		const data = await resolvePost(req)
+    const { fileHash, filename } = data
+    const filePath = path.resolve(UPLOAD_DIR, `${fileHash}${extractExt(filename)}`)
+    if (fse.existsSync(filePath)) {
+      res.end(
+        JSON.stringify({
+          shouldUpload: false
+        })
+      );
+    } else {
+			// 文件不在服务器中，计算一下，还缺多少个切片需要上传
+      res.end(
+        JSON.stringify({
+          shouldUpload: true,
+          uploadedList: await createUploadedList(fileHash)
+        })
+      );
+    }
 	}
 }

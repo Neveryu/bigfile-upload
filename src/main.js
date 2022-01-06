@@ -8,3 +8,9 @@ new FcChina()
 new FcUnderlineBtn()
 
 createApp(App).mount('#app')
+
+/**
+ * 关于fancy-components
+ * https://juejin.cn/post/7013247812628381704
+ * https://github.com/fancy-components/fancy-components/issues/2
+ */

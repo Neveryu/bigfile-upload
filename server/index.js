@@ -14,7 +14,7 @@ server.on("request", (req, res) => {
   }
 
   if (req.url === '/verify') {
-    // todo
+    controller.handleVerifyUpload(req, res)
   }
 
   if (req.url === '/merge') {

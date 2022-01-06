@@ -1,8 +1,8 @@
 <template>
-  <fc-china></fc-china>
-  <p>文件上传</p>
-
   <div class="container">
+    <fc-china></fc-china>
+    <p class="title">文件上传</p>
+
   	<input type="file" @change="handleFileChange">
   	<br><br>
   	<fc-typing-input placeholder="选择文件"></fc-typing-input>
@@ -11,7 +11,7 @@
     <br><br>
     <span>计算文件hash进度： {{hashPercentage}}</span>
   	<br><br>
-    <span>上次进度：{{uploadPercentage}}</span>
+    <span>上传进度：{{uploadPercentage}}</span>
   </div>
 </template>
 
@@ -34,12 +34,18 @@ function request({
 }) {
   return new Promise(resolve => {
     const xhr = new XMLHttpRequest()
-    xhr.upload.onprogress = onProgress
-    xhr.open(method, url)
     Object.keys(headers).forEach(key =>
       xhr.setRequestHeader(key, headers[key])
     )
+    // 一个无符号长整型（unsigned long）数字，表示该请求的最大请求时间（毫秒），若超出该时间，请求会自动终止。
+    xhr.timeout = 16000
+    xhr.upload.onprogress = onProgress
+    xhr.open(method, url)
+    xhr.ontimeout = e => {
+      console.log('请求超时')
+    }
     xhr.send(data)
+    // XMLHttpRequest请求成功完成时触发；也可以使用 onload 属性
     xhr.onload = e => {
       // 将请求成功的 xhr 从列表中删除
       if (requestList) {
@@ -49,7 +55,9 @@ function request({
       resolve({
         data: e.target.response
       })
-    };
+    }
+    // 当请求结束时触发, 无论请求成功(load)还是失败(abort 或 error)。也可以使用 onloadend 属性。
+    xhr.onloadend = e => e
     // 暴露当前 xhr 给外部
     requestList?.push(xhr)
   })
@@ -84,10 +92,6 @@ export default {
       if (!file) return;
       // Object.assign(this.$data, this.$options.data());
       container.file = file;
-
-      console.log(container.file, 111)
-
-      // console.log(this, 123)
     }
 
     // 上传按钮
@@ -104,9 +108,11 @@ export default {
     	container.hash = await calculateHash(fileChunkList)
     	console.log('文件hash是：', container.hash)
 
-      const { shouldUpload } = await verifyUpload(container.file.name, container.file.hash)
+      const { shouldUpload, uploadedList } = await verifyUpload(container.file.name, container.file.hash)
+      // 服务器已经有完整文件了
       if(!shouldUpload) {
-        console.log('秒传：上传成功')
+        alert('秒传：上传成功')
+        status.value = Status.wait
         return
       }
 
@@ -116,9 +122,10 @@ export default {
     		hash: `${container.hash}-${index}`,
     		chunk: file,
     		size: file.size,
-        percentage: 0
+        // 如果已上传切片数组uploadedList中包含这个切片，则证明这个切片之前已经上传成功了，进度设为100。
+        percentage: uploadedList.includes(index) ? 100 : 0
     	}))
-    	uploadChunks(data.value)
+    	uploadChunks(uploadedList)
     }
 
     /**
@@ -157,26 +164,34 @@ export default {
 
     // 上传切片
     // todo: 同时过滤已上传的切片
+    /**
+     * 上传切片
+     * uploadedList：已经上传了的切片，这次不用上传了
+     */
     async function uploadChunks(uploadedList = []) {
-      const requestList = uploadedList.map(({ chunk, hash, index }) => {
-        const formData = new FormData();
-        // 切片文件
-        formData.append('chunk', chunk);
-        // 切片文件hash
-        formData.append('hash', hash);
-        // 大文件的文件名
-        formData.append('filename', container.file.name);
-        // 大文件hash
-        formData.append('fileHash', container.hash)
-        return { formData, index };
-      })
-      .map(async ({ formData, index }) =>
-        request({
-          url: 'http://localhost:9999',
-          data: formData,
-          onProgress: createProgressHandler(index, data.value[index])
+      const requestList = data.value
+        .filter(({ hash }) => !uploadedList.includes(hash))
+        .map(({ chunk, hash, index }) => {
+          const formData = new FormData()
+          // 切片文件
+          formData.append('chunk', chunk)
+          // 切片文件hash
+          formData.append('hash', hash)
+          // 大文件的文件名
+          formData.append('filename', container.file.name)
+          // 大文件hash
+          formData.append('fileHash', container.hash)
+          return { formData, index }
         })
-      )
+        .map(async ({ formData, index }) =>
+          request({
+            url: 'http://localhost:9999',
+            data: formData,
+            onProgress: createProgressHandler(index, data.value[index]),
+            // todo
+            // requestList: 
+          })
+        )
 
       // 并发切片
       await Promise.all(requestList)
@@ -200,7 +215,7 @@ export default {
       }
     }
 
-    function verifyUpload(filename, fileHash) {
+    async function verifyUpload(filename, fileHash) {
       const { data } = await request({
         url: 'http://localhost:9999/verify',
         headers: {
@@ -230,14 +245,17 @@ export default {
     	status.value = Status.wait
     }
 
-
+    function onFcChiniEnd() {
+      console.log(11)
+    }
 
     return {
       hashPercentage,
       uploadPercentage,
       container,
       handleFileChange,
-      handleUpload
+      handleUpload,
+      onFcChiniEnd
     }
   }
 }
@@ -245,8 +263,70 @@ export default {
 
 <style scoped>
 .container {
-	margin-top: 50px;
-	width: 600px;
+  width: 100%;
+  height: 100%;
 	margin: 0 auto;
+  animation: setBgcRed 0.4s ease-in 5s forwards, setBgcWhite 0s ease-in 7s forwards;
+  overflow: hidden;
 }
+fc-china {
+  --width: 150vh;
+  --height: 100vh;
+  margin: 0 auto;
+  animation: resize 0s ease-in 7s forwards;
+}
+.container .title {
+  font-size: 24px;
+  font-weight: 500;
+  color: #205374;
+}
+fc-typing-input {
+  margin: 0 auto;
+}
+fc-underline-btn {
+  --width: 120px;
+  --height: 50px;
+  margin: 0 auto;
+}
+
+@keyframes setBgcRed {
+  to {
+    background-color: red;
+  }
+}
+/* Safari 与 Chrome */
+@-webkit-keyframes setBgcRed {
+  to {
+    background-color: red;
+  }
+}
+
+@keyframes setBgcWhite {
+  to {
+    background-color: #fff;
+  }
+}
+/* Safari 与 Chrome */
+@-webkit-keyframes setBgcWhite {
+  to {
+    background-color: #fff;
+  }
+}
+
+@keyframes resize {
+  to {
+    --width: 300px;
+    --height: 200px;
+    margin: 0;
+  }
+}
+/* Safari 与 Chrome */
+@-webkit-keyframes resize {
+  to {
+    --width: 300px;
+    --height: 200px;
+    margin: 0;
+  }
+}
+
 </style>
