@@ -101,11 +101,6 @@ const resolvePost = req => {
 	})
 }
 
-// 返回已经上传的切片名
-const createUploadedList = async fileHash => {
-	return fse.existsSync(path.resolve(UPLOAD_DIR, fileHash)) ? await fse.readdir(path.resolve(UPLOAD_DIR, fileHash)) : []
-}
-
 /**
  * 返回已经上传切片名
  * @param {*} fileHash 

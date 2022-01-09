@@ -2,12 +2,13 @@
   <div class="container">
     <fc-china></fc-china>
     <p class="title">文件上传</p>
-
   	<input type="file" @change="handleFileChange">
   	<br><br>
-  	<fc-typing-input placeholder="选择文件"></fc-typing-input>
+  	<!-- <fc-typing-input placeholder="选择文件"></fc-typing-input> -->
   	<br><br>
   	<fc-underline-btn @click.stop="handleUpload">上传</fc-underline-btn>
+    <fc-arrow-btn @click.stop="handlePause">暂停</fc-arrow-btn>
+    <fc-pixel-btn @click.stop="handleResume">恢复</fc-pixel-btn>
     <br><br>
     <span>计算文件hash进度： {{hashPercentage}}</span>
   	<br><br>
@@ -22,7 +23,7 @@ const Status = {
 	pause: 'pause',
 	uploading: 'uploading'
 }
-const SIZE = 1000 * 1024
+const SIZE = 100 * 1024
 // 基于xhr封装的，用来发送请求的
 function request({
   url,
@@ -34,18 +35,18 @@ function request({
 }) {
   return new Promise(resolve => {
     const xhr = new XMLHttpRequest()
+    // 一个无符号长整型（unsigned long）数字，表示该请求的最大请求时间（毫秒），若超出该时间，请求会自动终止。
+    // xhr.timeout = 100000
+    xhr.upload.onprogress = onProgress
+    xhr.open(method, url)
     Object.keys(headers).forEach(key =>
       xhr.setRequestHeader(key, headers[key])
     )
-    // 一个无符号长整型（unsigned long）数字，表示该请求的最大请求时间（毫秒），若超出该时间，请求会自动终止。
-    xhr.timeout = 16000
-    xhr.upload.onprogress = onProgress
-    xhr.open(method, url)
     xhr.ontimeout = e => {
       console.log('请求超时')
     }
     xhr.send(data)
-    // XMLHttpRequest请求成功完成时触发；也可以使用 onload 属性
+    // XMLHttpRequest请求成功完成时触发；
     xhr.onload = e => {
       // 将请求成功的 xhr 从列表中删除
       if (requestList) {
@@ -69,6 +70,8 @@ export default {
     const container = reactive({
     	file: null
     })
+    // 当前的请求xhr组成的数组
+    const requestListArr = ref([])
     const data = ref([])
     const status = ref(Status.wait)
     // 生成文件hash的进度
@@ -78,7 +81,6 @@ export default {
       if (!container.file || !data.value.length) {
         return 0
       }
-      // todo
       const loaded = data.value.map(item => {
         return item.size * item.percentage
       }).reduce((acc, cur) => {
@@ -87,9 +89,41 @@ export default {
       return parseInt((loaded / container.file.size).toFixed(2))
     })
 
+    /**
+     * 暂停
+     */
+    function handlePause() {
+      status.value = Status.pause
+      resetData()
+    }
+    function resetData() {
+      requestListArr.value.forEach(xhr => xhr?.abort())
+      requestListArr.value = []
+      if (container.worker) {
+        container.worker.onmessage = null
+      }
+    }
+
+    /**
+     * 恢复上传
+     * 上传进度是实时根据所有的上传切片的进度汇总来的
+     * 只有某个切片完整/全部上传到了服务端，才算这个切片上传完成了
+     * 如果，一些切片如果只上传了一部分，就被暂停了，那么恢复上传时，这一些切片是需要重新上传的
+     * 这样就会导致恢复上传时，上传进度倒退的问题（因为上传进度是计算属性，是实时计算切片，汇总而来的）
+     */
+    async function handleResume() {
+      status.value = Status.uploading
+      const { uploadedList } = await verifyUpload(container.file.name, container.hash)
+      uploadChunks(uploadedList)
+    }
+
+    /**
+     * 选择了文件
+     */
     function handleFileChange(e) {
     	const [file] = e.target.files;
       if (!file) return;
+      // todo
       // Object.assign(this.$data, this.$options.data());
       container.file = file;
     }
@@ -108,7 +142,8 @@ export default {
     	container.hash = await calculateHash(fileChunkList)
     	console.log('文件hash是：', container.hash)
 
-      const { shouldUpload, uploadedList } = await verifyUpload(container.file.name, container.file.hash)
+      // uploadedList已上传的切片的切片文件名称
+      const { shouldUpload, uploadedList } = await verifyUpload(container.file.name, container.hash)
       // 服务器已经有完整文件了
       if(!shouldUpload) {
         alert('秒传：上传成功')
@@ -153,19 +188,17 @@ export default {
 
     // 生成文件切片
     function createFileChunk(file, size = SIZE) {
-     const fileChunkList = [];
-      let cur = 0;
+     const fileChunkList = []
+      let cur = 0
       while (cur < file.size) {
-        fileChunkList.push({ file: file.slice(cur, cur + size) });
-        cur += size;
+        fileChunkList.push({ file: file.slice(cur, cur + size) })
+        cur += size
       }
-      return fileChunkList;
+      return fileChunkList
     }
 
-    // 上传切片
-    // todo: 同时过滤已上传的切片
     /**
-     * 上传切片
+     * 上传切片，同时过滤已上传的切片
      * uploadedList：已经上传了的切片，这次不用上传了
      */
     async function uploadChunks(uploadedList = []) {
@@ -188,26 +221,24 @@ export default {
             url: 'http://localhost:9999',
             data: formData,
             onProgress: createProgressHandler(index, data.value[index]),
-            // todo
-            // requestList: 
+            requestList: requestListArr.value
           })
         )
 
       // 并发切片
       await Promise.all(requestList)
-      // todo
-      // 之前上传的切片数量 + 本次上传的切片数量 = 所有切片数量时
-      
 
+      // 之前上传的切片数量 + 本次上传的切片数量 = 所有切片数量时  
       // 切片并发上传完以后，发个请求告诉后端：合并切片
-      mergeRequest()
+      if (uploadedList.length + requestList.length === data.value.length) {
+        mergeRequest()
+      }
     }
 
     /**
      * 上传切片进度的回调函数
      */
     function createProgressHandler(index, item) {
-      // console.log('++++', index, '-', item)
       return e => {
         if(e.lengthComputable) {
           item.percentage = parseInt(String((e.loaded / e.total) * 100))
@@ -215,6 +246,9 @@ export default {
       }
     }
 
+    /**
+     * 验证该文件是否需要上次，文件通过hash生成唯一，改名后也是不需要再上传的，也就相当于妙传
+     */
     async function verifyUpload(filename, fileHash) {
       const { data } = await request({
         url: 'http://localhost:9999/verify',
@@ -229,6 +263,9 @@ export default {
       return JSON.parse(data)
     }
 
+    /**
+     * 发请求通知服务器，合并切片啦～
+     */
     async function mergeRequest() {
     	await request({
     		url: "http://localhost:9999/merge",
@@ -245,17 +282,14 @@ export default {
     	status.value = Status.wait
     }
 
-    function onFcChiniEnd() {
-      console.log(11)
-    }
-
     return {
       hashPercentage,
       uploadPercentage,
       container,
       handleFileChange,
       handleUpload,
-      onFcChiniEnd
+      handlePause,
+      handleResume
     }
   }
 }
@@ -279,14 +313,28 @@ fc-china {
   font-size: 24px;
   font-weight: 500;
   color: #205374;
+  padding:
 }
 fc-typing-input {
   margin: 0 auto;
 }
 fc-underline-btn {
+  display: inline-block;
   --width: 120px;
   --height: 50px;
-  margin: 0 auto;
+  margin: 0px 15px;
+}
+fc-arrow-btn {
+  display: inline-block;
+  --width: 120px;
+  --height: 50px;
+  margin: 0px 15px;
+}
+fc-pixel-btn {
+  display: inline-block;
+  --width: 120px;
+  --height: 50px;
+  margin: 0px 15px;
 }
 
 @keyframes setBgcRed {
