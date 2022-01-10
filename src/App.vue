@@ -2,27 +2,42 @@
   <div class="container">
     <fc-china></fc-china>
     <p class="title">文件上传</p>
-  	<input type="file" @change="handleFileChange">
-  	<br><br>
-  	<!-- <fc-typing-input placeholder="选择文件"></fc-typing-input> -->
-  	<br><br>
-  	<fc-underline-btn @click.stop="handleUpload">上传</fc-underline-btn>
-    <fc-arrow-btn @click.stop="handlePause">暂停</fc-arrow-btn>
-    <fc-pixel-btn @click.stop="handleResume">恢复</fc-pixel-btn>
-    <br><br>
-    <span>计算文件hash进度： {{hashPercentage}}</span>
-  	<br><br>
-    <span>上传进度：{{uploadPercentage}}</span>
+    <input
+      type="file"
+      :disabled="status !== Status.wait"
+      @change="handleFileChange"
+    />
+    <br /><br />
+    <!-- <fc-typing-input placeholder="选择文件"></fc-typing-input> -->
+    <br /><br />
+    <fc-underline-btn @click.stop="handleUpload" :disabled="uploadDisabled">
+      上传
+    </fc-underline-btn>
+
+    <fc-pixel-btn @click.stop="handleResume" v-if="status === Status.pause"
+      >恢复</fc-pixel-btn
+    >
+    <fc-arrow-btn
+      @click.stop="handlePause"
+      v-else
+      :disabled="status !== Status.uploading || !container.hash"
+      >暂停</fc-arrow-btn
+    >
+    <br /><br />
+    <span>计算文件hash进度： {{ hashPercentage }}%</span>
+    <br /><br />
+    <span>上传进度：{{ fakeUploadPercentage }}%</span>
   </div>
 </template>
 
 <script>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 const Status = {
-	wait: 'wait',
-	pause: 'pause',
-	uploading: 'uploading'
+  wait: 'wait',
+  pause: 'pause',
+  uploading: 'uploading',
 }
+// 切片大小（100kb）
 const SIZE = 100 * 1024
 // 基于xhr封装的，用来发送请求的
 function request({
@@ -30,35 +45,35 @@ function request({
   method = 'post',
   data,
   headers = {},
-  onProgress = e => e,
-  requestList
+  onProgress = (e) => e,
+  requestList,
 }) {
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const xhr = new XMLHttpRequest()
     // 一个无符号长整型（unsigned long）数字，表示该请求的最大请求时间（毫秒），若超出该时间，请求会自动终止。
     // xhr.timeout = 100000
     xhr.upload.onprogress = onProgress
     xhr.open(method, url)
-    Object.keys(headers).forEach(key =>
+    Object.keys(headers).forEach((key) =>
       xhr.setRequestHeader(key, headers[key])
     )
-    xhr.ontimeout = e => {
+    xhr.ontimeout = (e) => {
       console.log('请求超时')
     }
     xhr.send(data)
     // XMLHttpRequest请求成功完成时触发；
-    xhr.onload = e => {
+    xhr.onload = (e) => {
       // 将请求成功的 xhr 从列表中删除
       if (requestList) {
-        const xhrIndex = requestList.findIndex(item => item === xhr)
+        const xhrIndex = requestList.findIndex((item) => item === xhr)
         requestList.splice(xhrIndex, 1)
       }
       resolve({
-        data: e.target.response
+        data: e.target.response,
       })
     }
     // 当请求结束时触发, 无论请求成功(load)还是失败(abort 或 error)。也可以使用 onloadend 属性。
-    xhr.onloadend = e => e
+    xhr.onloadend = (e) => e
     // 暴露当前 xhr 给外部
     requestList?.push(xhr)
   })
@@ -68,7 +83,9 @@ export default {
   name: 'App',
   setup(props, ctx) {
     const container = reactive({
-    	file: null
+      file: null,
+      hash: '',
+      worker: null,
     })
     // 当前的请求xhr组成的数组
     const requestListArr = ref([])
@@ -81,12 +98,30 @@ export default {
       if (!container.file || !data.value.length) {
         return 0
       }
-      const loaded = data.value.map(item => {
-        return item.size * item.percentage
-      }).reduce((acc, cur) => {
-        return acc + cur
-      })
+      const loaded = data.value
+        .map((item) => {
+          return item.size * item.percentage
+        })
+        .reduce((acc, cur) => {
+          return acc + cur
+        })
       return parseInt((loaded / container.file.size).toFixed(2))
+    })
+    // 上传按钮是否可以点击
+    const uploadDisabled = computed(() => {
+      return (
+        !container.file ||
+        [Status.pause, Status.uploading].includes(status.value)
+      )
+    })
+    // 显示在页面上的文件上传进度
+    const fakeUploadPercentage = ref(0)
+    // watch uploadPercentage，得到fakeUploadPercentage
+    // 至于为什么要这么做，看【恢复上传】的注释
+    watch(uploadPercentage, (newValue) => {
+      if (newValue > fakeUploadPercentage.value) {
+        fakeUploadPercentage.value = newValue
+      }
     })
 
     /**
@@ -97,7 +132,7 @@ export default {
       resetData()
     }
     function resetData() {
-      requestListArr.value.forEach(xhr => xhr?.abort())
+      requestListArr.value.forEach((xhr) => xhr?.abort())
       requestListArr.value = []
       if (container.worker) {
         container.worker.onmessage = null
@@ -105,7 +140,7 @@ export default {
     }
 
     /**
-     * 恢复上传
+     * 【恢复上传】
      * 上传进度是实时根据所有的上传切片的进度汇总来的
      * 只有某个切片完整/全部上传到了服务端，才算这个切片上传完成了
      * 如果，一些切片如果只上传了一部分，就被暂停了，那么恢复上传时，这一些切片是需要重新上传的
@@ -113,7 +148,10 @@ export default {
      */
     async function handleResume() {
       status.value = Status.uploading
-      const { uploadedList } = await verifyUpload(container.file.name, container.hash)
+      const { uploadedList } = await verifyUpload(
+        container.file.name,
+        container.hash
+      )
       uploadChunks(uploadedList)
     }
 
@@ -121,46 +159,49 @@ export default {
      * 选择了文件
      */
     function handleFileChange(e) {
-    	const [file] = e.target.files;
-      if (!file) return;
+      const [file] = e.target.files
+      if (!file) return
       // todo
       // Object.assign(this.$data, this.$options.data());
-      container.file = file;
+      container.file = file
     }
 
     // 上传按钮
     async function handleUpload() {
-    	if(!container.file) {
-    		return
-    	}
-    	// 点了上传按钮，状态改为上传中...
-    	status.value = Status.uploading
-    	// 文件分片
-    	const fileChunkList = createFileChunk(container.file)
-    	console.log('文件分了多少片：', fileChunkList.length)
-    	// 文件hash
-    	container.hash = await calculateHash(fileChunkList)
-    	console.log('文件hash是：', container.hash)
+      if (!container.file) {
+        return
+      }
+      // 点了上传按钮，状态改为上传中...
+      status.value = Status.uploading
+      // 文件分片
+      const fileChunkList = createFileChunk(container.file)
+      console.log('文件分了多少片：', fileChunkList.length)
+      // 文件hash
+      container.hash = await calculateHash(fileChunkList)
+      console.log('文件hash是：', container.hash)
 
       // uploadedList已上传的切片的切片文件名称
-      const { shouldUpload, uploadedList } = await verifyUpload(container.file.name, container.hash)
+      const { shouldUpload, uploadedList } = await verifyUpload(
+        container.file.name,
+        container.hash
+      )
       // 服务器已经有完整文件了
-      if(!shouldUpload) {
+      if (!shouldUpload) {
         alert('秒传：上传成功')
         status.value = Status.wait
         return
       }
 
-    	data.value = fileChunkList.map(({ file }, index) => ({
-    		fileHash: container.hash,
-    		index,
-    		hash: `${container.hash}-${index}`,
-    		chunk: file,
-    		size: file.size,
+      data.value = fileChunkList.map(({ file }, index) => ({
+        fileHash: container.hash,
+        index,
+        hash: `${container.hash}-${index}`,
+        chunk: file,
+        size: file.size,
         // 如果已上传切片数组uploadedList中包含这个切片，则证明这个切片之前已经上传成功了，进度设为100。
-        percentage: uploadedList.includes(index) ? 100 : 0
-    	}))
-    	uploadChunks(uploadedList)
+        percentage: uploadedList.includes(index) ? 100 : 0,
+      }))
+      uploadChunks(uploadedList)
     }
 
     /**
@@ -173,10 +214,10 @@ export default {
      * @return   {[type]}                               [description]
      */
     function calculateHash(fileChunkList) {
-      return new Promise(resolve => {
+      return new Promise((resolve) => {
         container.worker = new Worker('/hash.js')
         container.worker.postMessage({ fileChunkList })
-        container.worker.onmessage = e => {
+        container.worker.onmessage = (e) => {
           const { percentage, hash } = e.data
           hashPercentage.value = percentage
           if (hash) {
@@ -188,10 +229,12 @@ export default {
 
     // 生成文件切片
     function createFileChunk(file, size = SIZE) {
-     const fileChunkList = []
+      const fileChunkList = []
       let cur = 0
       while (cur < file.size) {
-        fileChunkList.push({ file: file.slice(cur, cur + size) })
+        fileChunkList.push({
+          file: file.slice(cur, cur + size),
+        })
         cur += size
       }
       return fileChunkList
@@ -221,14 +264,14 @@ export default {
             url: 'http://localhost:9999',
             data: formData,
             onProgress: createProgressHandler(index, data.value[index]),
-            requestList: requestListArr.value
+            requestList: requestListArr.value,
           })
         )
 
       // 并发切片
       await Promise.all(requestList)
 
-      // 之前上传的切片数量 + 本次上传的切片数量 = 所有切片数量时  
+      // 之前上传的切片数量 + 本次上传的切片数量 = 所有切片数量时
       // 切片并发上传完以后，发个请求告诉后端：合并切片
       if (uploadedList.length + requestList.length === data.value.length) {
         mergeRequest()
@@ -237,10 +280,11 @@ export default {
 
     /**
      * 上传切片进度的回调函数
+     * 用闭包保存每个chunk的进度数据
      */
     function createProgressHandler(index, item) {
-      return e => {
-        if(e.lengthComputable) {
+      return (e) => {
+        if (e.lengthComputable) {
           item.percentage = parseInt(String((e.loaded / e.total) * 100))
         }
       }
@@ -253,12 +297,12 @@ export default {
       const { data } = await request({
         url: 'http://localhost:9999/verify',
         headers: {
-          "content-type": "application/json"
+          'content-type': 'application/json',
         },
         data: JSON.stringify({
           filename,
-          fileHash
-        })
+          fileHash,
+        }),
       })
       return JSON.parse(data)
     }
@@ -267,31 +311,36 @@ export default {
      * 发请求通知服务器，合并切片啦～
      */
     async function mergeRequest() {
-    	await request({
-    		url: "http://localhost:9999/merge",
-    		headers: {
-    			"content-type": "application/json"
-    		},
-    		data: JSON.stringify({
-    			size: SIZE,
-    			fileHash: container.hash,
-    			filename: container.file.name
-    		})
-    	})
-    	alert('上传成功')
-    	status.value = Status.wait
+      await request({
+        url: 'http://localhost:9999/merge',
+        headers: {
+          'content-type': 'application/json',
+        },
+        data: JSON.stringify({
+          size: SIZE,
+          fileHash: container.hash,
+          filename: container.file.name,
+        }),
+      })
+      alert('上传成功')
+      status.value = Status.wait
     }
 
     return {
+      status,
+      uploadDisabled,
       hashPercentage,
-      uploadPercentage,
+      fakeUploadPercentage,
       container,
       handleFileChange,
       handleUpload,
       handlePause,
-      handleResume
+      handleResume,
     }
-  }
+  },
+  data() {
+    this.Status = Status
+  },
 }
 </script>
 
@@ -299,8 +348,9 @@ export default {
 .container {
   width: 100%;
   height: 100%;
-	margin: 0 auto;
-  animation: setBgcRed 0.4s ease-in 5s forwards, setBgcWhite 0s ease-in 7s forwards;
+  margin: 0 auto;
+  animation: setBgcRed 0.4s ease-in 5s forwards,
+    setBgcWhite 0s ease-in 7s forwards;
   overflow: hidden;
 }
 fc-china {
@@ -313,7 +363,7 @@ fc-china {
   font-size: 24px;
   font-weight: 500;
   color: #205374;
-  padding:
+  padding: 5px;
 }
 fc-typing-input {
   margin: 0 auto;
@@ -376,5 +426,4 @@ fc-pixel-btn {
     margin: 0;
   }
 }
-
 </style>
