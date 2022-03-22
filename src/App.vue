@@ -39,8 +39,8 @@ const Status = {
   pause: 'pause',
   uploading: 'uploading',
 }
-// 切片大小（100kb）
-const SIZE = 1000 * 1024
+// 切片大小（200kb）
+const SIZE = 200 * 1024
 // 基于xhr封装的，用来发送请求的
 function request({
   url,
