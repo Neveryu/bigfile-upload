@@ -49,10 +49,10 @@ const mergeFileChunk = async (filePath, fileHash, size) => {
 	const chunkDir = path.resolve(UPLOAD_DIR, fileHash)
 	const chunkPaths = await fse.readdir(chunkDir)
 	// 根据切片下标进行排序
-  // 否则直接读取目录的获得的顺序可能会错乱
-  chunkPaths.sort((a,b) => {
-  	return a.split('-')[1] - b.split('-')[1]
-  })
+	// 否则直接读取目录的获得的顺序可能会错乱
+	chunkPaths.sort((a, b) => {
+		return a.split('-')[1] - b.split('-')[1]
+	})
 	await Promise.all(
 		chunkPaths.map((chunkPath, index) => {
 			return pipeStream(
@@ -107,14 +107,14 @@ const resolvePost = req => {
  * @returns 
  */
 const createUploadedList = async fileHash => {
-  return fse.existsSync(path.resolve(UPLOAD_DIR, fileHash))
+	return fse.existsSync(path.resolve(UPLOAD_DIR, fileHash))
 		? await fse.readdir(path.resolve(UPLOAD_DIR, fileHash))
 		: []
 }
 
 module.exports = class {
 	// 合并切片
-	async	handleMerge(req, res) {
+	async handleMerge(req, res) {
 		const data = await resolvePost(req)
 		const { fileHash, filename, size } = data
 		const filePath = path.resolve(UPLOAD_DIR, `${fileHash}${extractExt(filename)}`)
@@ -147,7 +147,7 @@ module.exports = class {
 			})
 		)
 	}
-	
+
 	/**
 	 * 处理前端上传过来的切片
 	 * @Author   Author
@@ -161,7 +161,7 @@ module.exports = class {
 		// 在 multipart.parse 的回调中
 		// files 参数保存了 FormData 中文件，fields 参数保存了 FormData 中非文件的字段
 		multipart.parse(req, async (err, fields, files) => {
-			if(err) {
+			if (err) {
 				console.log('处理某个切片时错误：', err)
 				req.status = 500
 				res.end('process file chunk failed')
@@ -189,7 +189,7 @@ module.exports = class {
 			// 把文件切片移动到我们的切片文件夹中
 			fse.move(chunk.path, path.resolve(chunkDir, hash))
 			res.end('received file chunk')
-		})	
+		})
 	}
 
 	/**
@@ -200,22 +200,22 @@ module.exports = class {
 	 */
 	async handleVerifyUpload(req, res) {
 		const data = await resolvePost(req)
-    const { fileHash, filename } = data
-    const filePath = path.resolve(UPLOAD_DIR, `${fileHash}${extractExt(filename)}`)
-    if (fse.existsSync(filePath)) {
-      res.end(
-        JSON.stringify({
-          shouldUpload: false
-        })
-      );
-    } else {
+		const { fileHash, filename } = data
+		const filePath = path.resolve(UPLOAD_DIR, `${fileHash}${extractExt(filename)}`)
+		if (fse.existsSync(filePath)) {
+			res.end(
+				JSON.stringify({
+					shouldUpload: false
+				})
+			);
+		} else {
 			// 文件不在服务器中，计算一下，还缺多少个切片需要上传
-      res.end(
-        JSON.stringify({
-          shouldUpload: true,
-          uploadedList: await createUploadedList(fileHash)
-        })
-      );
-    }
+			res.end(
+				JSON.stringify({
+					shouldUpload: true,
+					uploadedList: await createUploadedList(fileHash)
+				})
+			);
+		}
 	}
 }

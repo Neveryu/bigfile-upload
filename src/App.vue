@@ -10,19 +10,21 @@
     <br /><br />
     <!-- <fc-typing-input placeholder="选择文件"></fc-typing-input> -->
     <br /><br />
-    <fc-underline-btn @click.stop="handleUpload" :disabled="uploadDisabled">
+    <fc-underline-btn @click.stop="handleUpload" v-if="!uploadDisabled">
       上传
     </fc-underline-btn>
 
     <fc-pixel-btn @click.stop="handleResume" v-if="status === Status.pause"
       >恢复</fc-pixel-btn
     >
-    <fc-arrow-btn
-      @click.stop="handlePause"
+    <button
+      class="pause-btn"
       v-else
+      @click.stop="handlePause"
       :disabled="status !== Status.uploading || !container.hash"
-      >暂停</fc-arrow-btn
     >
+      暂 停
+    </button>
     <br /><br />
     <span>计算文件hash进度： {{ hashPercentage }}%</span>
     <br /><br />
@@ -31,14 +33,14 @@
 </template>
 
 <script>
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, nextTick } from 'vue'
 const Status = {
   wait: 'wait',
   pause: 'pause',
   uploading: 'uploading',
 }
 // 切片大小（100kb）
-const SIZE = 100 * 1024
+const SIZE = 1000 * 1024
 // 基于xhr封装的，用来发送请求的
 function request({
   url,
@@ -89,10 +91,12 @@ export default {
     })
     // 当前的请求xhr组成的数组
     const requestListArr = ref([])
+    // 组装的filechunk分段文件
     const data = ref([])
     const status = ref(Status.wait)
     // 生成文件hash的进度
     const hashPercentage = ref(0)
+
     // 文件上传的进度
     const uploadPercentage = computed(() => {
       if (!container.file || !data.value.length) {
@@ -114,6 +118,7 @@ export default {
         [Status.pause, Status.uploading].includes(status.value)
       )
     })
+
     // 显示在页面上的文件上传进度
     const fakeUploadPercentage = ref(0)
     // watch uploadPercentage，得到fakeUploadPercentage
@@ -129,9 +134,19 @@ export default {
      */
     function handlePause() {
       status.value = Status.pause
-      resetData()
+      requestListArr.value.forEach((xhr) => xhr?.abort())
+      requestListArr.value = []
+      if (container.worker) {
+        container.worker.onmessage = null
+      }
     }
+    /**
+     * 重置
+     */
     function resetData() {
+      hashPercentage.value = 0
+      uploadPercentage.value = 0
+      fakeUploadPercentage.value = 0
       requestListArr.value.forEach((xhr) => xhr?.abort())
       requestListArr.value = []
       if (container.worker) {
@@ -160,9 +175,8 @@ export default {
      */
     function handleFileChange(e) {
       const [file] = e.target.files
+      resetData()
       if (!file) return
-      // todo
-      // Object.assign(this.$data, this.$options.data());
       container.file = file
     }
 
@@ -185,10 +199,16 @@ export default {
         container.file.name,
         container.hash
       )
+
+      // 组装的filechunk数据先置空
+      data.value = []
+
       // 服务器已经有完整文件了
       if (!shouldUpload) {
-        alert('秒传：上传成功')
+        fakeUploadPercentage.value = 100
         status.value = Status.wait
+        await nextTick()
+        alert('秒传：上传成功')
         return
       }
 
@@ -219,7 +239,7 @@ export default {
         container.worker.postMessage({ fileChunkList })
         container.worker.onmessage = (e) => {
           const { percentage, hash } = e.data
-          hashPercentage.value = percentage
+          hashPercentage.value = percentage.toFixed(2)
           if (hash) {
             resolve(hash)
           }
@@ -245,6 +265,7 @@ export default {
      * uploadedList：已经上传了的切片，这次不用上传了
      */
     async function uploadChunks(uploadedList = []) {
+      console.log(uploadedList, 'uploadedList')
       const requestList = data.value
         .filter(({ hash }) => !uploadedList.includes(hash))
         .map(({ chunk, hash, index }) => {
@@ -328,6 +349,7 @@ export default {
 
     return {
       status,
+      Status,
       uploadDisabled,
       hashPercentage,
       fakeUploadPercentage,
@@ -337,9 +359,6 @@ export default {
       handlePause,
       handleResume,
     }
-  },
-  data() {
-    this.Status = Status
   },
 }
 </script>
@@ -360,7 +379,7 @@ fc-china {
   animation: resize 0s ease-in 7s forwards;
 }
 .container .title {
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 500;
   color: #205374;
   padding: 5px;
@@ -385,6 +404,10 @@ fc-pixel-btn {
   --width: 120px;
   --height: 50px;
   margin: 0px 15px;
+}
+
+.pause-btn {
+  padding: 7px 15px;
 }
 
 @keyframes setBgcRed {
