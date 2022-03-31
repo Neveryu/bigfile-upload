@@ -1,4 +1,5 @@
-import { FcTypingInput, FcChina, FcUnderlineBtn, FcArrowBtn, FcPixelBtn } from 'http://unpkg.zhimg.com/fancy-components'
+// import { FcTypingInput, FcChina, FcUnderlineBtn, FcArrowBtn, FcPixelBtn } from 'http://unpkg.zhimg.com/fancy-components'
+import { FcTypingInput, FcChina, FcUnderlineBtn, FcArrowBtn, FcPixelBtn } from '../public/fance-components.js'
 import { createApp } from 'vue'
 import App from './App.vue'
 import './index.css'
